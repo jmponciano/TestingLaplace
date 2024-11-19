@@ -1,0 +1,313 @@
+---
+title: "Logit-Normal, one parameter"
+author: 
+- "Subhash Lele"
+- "C George Glen"
+- "Jose Miguel Ponciano"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+## Logit-Normal, one parameter
+First we upload the necessary function libraries
+```{r message=FALSE, warning=FALSE}
+#### ---------------------------------------------------------------------------
+#### Load functions
+source("TestingLaplaceToolkit4.0.R")
+source("TestingLaplaceTMB.functions7.0.R") 
+source("TestingLaplaceTMB.models2.0.R") 
+
+#### ---------------------------------------------------------------------------
+#### Load libraries
+library(ggplot2)
+library(patchwork)
+library(knitr)
+library(boot)
+```
+
+a) Comparison of the the MC likelihood function with TMB
+```{r echo=TRUE,  eval=FALSE}
+
+
+#### ---------------------------------------------------------------------------
+# Simulating data for Model: Latent variable  X ~ T(0, df1), 
+# a reasonably flat distribution 
+# W = X + eta where eta ~ N(0,sigma1)
+# Y_i ~ Binom(n=1,p=inv.logit(beta*X))
+
+# Response  is bivariate: c(W,Y) given X=x
+parms.invlog <- list(beta=-1, df1=2, sd1=3 )
+out.simLN <- sim.example(n=100, parm.list=parms.invlog, model="Logit.Norm")
+
+
+
+#### ---------------------------------------------------------------------------
+# DC run to estimate beta assuming all other parameters are known
+ModLN.dc.beta <- onedcfitrun(model="Logit.Norm", true.parms=parms.invlog,
+                            sim.data = out.simLN,n.iter=51000,n.adapt=1000,
+                            n.update=1000,thin=10, n.chains=3,clones.seq=c(1,16,32,64))
+
+# kable(round(dcdiag(ModLN.dc.beta),digits=4), 
+#       caption="Diagnostics for Data Cloning runs using multiple clones to assess convergence")
+
+Beta.hat <- summary(ModLN.dc.beta)[[1]][1]
+print(Beta.hat)
+
+# Or simply use 
+Beta.hatLN.CI <- confint(ModLN.dc.beta)
+
+
+#### ---------------------------------------------------------------------------
+MCprof.ModLN <- MCprofile1d(B=100000, parm.list=parms.invlog, sim.data=out.simLN, 
+                           bracket=6,prec.prof=0.01, model="Logit.Norm",
+                           plot.it=TRUE,overlay=FALSE)
+
+
+#### ---------------------------------------------------------------------------
+# LOESS smoothing of MC profile
+psi.grid <-  seq(Beta.hat-3.5,Beta.hat+3.5,0.01)
+MCdata <- data.frame(beta_values=MCprof.ModLN[,1],RelPL=MCprof.ModLN[,2])
+tmp <- loess(RelPL ~ beta_values,data=MCdata, span=0.08)
+newdata.Mod <- data.frame(beta_values=psi.grid)
+MCprof.smooth <- predict(tmp,newdata=newdata.Mod)
+MCprof4plot <- MCprof.smooth/max(MCprof.smooth)
+gridmcdf <- data.frame(Beta.values=psi.grid, Rel.Prof.Like=MCprof4plot)
+
+
+
+
+#### ---------------------------------------------------------------------------
+# TMB profile likelihood
+parms.invlog
+parms4tmb <- list(beta=parms.invlog$beta, df1=parms.invlog$df1,
+                  lnsd1 = log(parms.invlog$sd1))
+
+test4 <- run.tmb(profile.par.name="beta", profile.par=MCprof.ModLN[,1], 
+                 known.parm=parms4tmb, sim.data=out.simLN, model="Logit.Norm")
+
+
+```
+
+```{r echo=TRUE,  eval=FALSE}
+
+
+#### ---------------------------------------------------------------------------
+# Plot the MC profile with the TMB profile
+LN1 <- ggplot(gridmcdf, aes(Beta.values, Rel.Prof.Like) ) + 
+  geom_line(linewidth=1, aes(linetype ="black.line"), color="black") + xlim( c(-3,3) ) +
+  labs( x=bquote("Values of" ~ beta), y="Relative Likelihood", title = "A") +
+  geom_line(data = as.data.frame(test4$prof), 
+            aes( x=param, y=rel.like, linetype="red.line"), color = "red", linewidth=1) +
+  geom_line(data=data.frame(x=as.vector(Beta.hatLN.CI), y=c(0,0)), 
+            aes(x=x,y=y, linetype = "blue.line"), color = "blue", linewidth=2)+
+  geom_vline(linetype="dotted",linewidth=0.95, mapping = aes(linetype = "black.line2", xintercept = Beta.hat), color = "black")+
+ 
+  geom_hline(linetype="dotted",linewidth=0.9, mapping = aes(linetype="gray.line", yintercept = exp(-qchisq(p=0.95,df=1)/2)), color = "gray")+ 
+   scale_linetype_manual(name = "", values = c(red.line = 2, black.line = 1, blue.line = 1, black.line2 = 1, gray.line =2), 
+                          labels = c(red.line = "TMB", black.line = "MC", blue.line = "DC-CI", black.line2 = "MLE", gray.line = bquote("exp(-0.5"~ chi[0.95]^2~")")), 
+                          limits = c("red.line", "black.line", "blue.line", "black.line2", "gray.line"), 
+                          guide = guide_legend(override.aes = list(color = c("red", "black", "blue", "black", "gray"), linetype = c("dotted","solid","solid",    "dotted","dotted"), linewidth = c(1, 1,1, 1,1) )) ) +
+  theme_classic() + 
+  theme(text = element_text(size=15),
+             panel.grid.major = element_blank(),
+             panel.grid.minor = element_blank(),
+             strip.background = element_blank(),
+             axis.ticks.length=unit(0.2, "cm"), legend.position = "bottom") 
+LN1
+
+  
+```
+
+
+
+
+```{r echo=FALSE, fig.width=10, fig.height=8, fig.align='center'}
+knitr::include_graphics("LN1.png", dpi = 500)
+
+```
+b) Comparison of the MC likelihood function with GT
+```{r echo=TRUE,  eval=FALSE}
+
+
+#### ---------------------------------------------------------------------------
+# Sampling from the conditional unobserved process
+Xsamp.LN.par      <- parms.invlog
+Xsamp.LN.par$beta <- Beta.hat
+Xpost.ModLN <- Xpost.samp(model="Logit.Norm", parm.list=Xsamp.LN.par,
+                         sim.data=out.simLN, n.iter=51000,n.adapt=1000,
+                         n.update=1000,thin=2,n.chains=5)
+
+Xpost.binned <- do.call(rbind,Xpost.ModLN)
+
+# how is GT affected by using different reference values (say -2)
+# ModelLN.GTprof <- GT.prof(model="Logit.Norm", parm.list=parms.invlog,sim.data=out.simLN,
+#                         XpostSample=Xpost.binned, bracket=6, prec.prof=0.01,
+#                         plot.it=FALSE, overlay=FALSE,mycol="blue",
+#                         dotted=1)
+
+XpostSample <- Xpost.binned
+df1  <- parms.invlog$df1
+sd1  <- parms.invlog$sd1
+beta <- Beta.hat
+n <- nrow(out.simLN)
+W <- out.simLN[,1]
+Y <- out.simLN[,2]
+
+B <- nrow(XpostSample)
+
+
+
+#### ---------------------------------------------------------------------------
+# Computing GT's denominator for every sampled X and every value of the
+# parameter 'beta' we are profiling over
+
+bracket    <- 2
+prec.prof  <- 0.01 
+beta.profs <- seq(from=beta-bracket,to=beta+bracket, by=prec.prof)
+len.prof   <- length(beta.profs)
+prof.vec   <- rep(0,len.prof)
+
+for(i in 1:len.prof){
+  
+  ith.beta <- beta.profs[i]
+  #GT.lnumer.vec <- rep(0,B)
+  #GT.ldenom.vec <- rep(0,B)
+  GT.logdiff <- rep(0,B)
+  for(j in 1:B){
+    X.star <- XpostSample[j,]
+    pvec.num   <- 1/(1+exp(-ith.beta*X.star))
+    pvec.denom <- 1/(1+exp(-beta*X.star))
+    pvec.num[pvec.num==1]<- 0.99
+    pvec.num[pvec.num==0] <- .Machine$double.xmin
+    pvec.denom[pvec.denom==1]<- 0.99
+    pvec.denom[pvec.denom==0] <- .Machine$double.xmin
+    
+    GT.lnumer.persamp <- sum(Y*log(pvec.num) + (1-Y)*log(1-pvec.num)
+                             + dnorm(x=W, mean=X.star,sd=sd1, log=TRUE) +
+                               dt(x=X.star, df=df1, ncp=0,log=TRUE)) 
+    GT.ldenom.persamp <- sum(Y*log(pvec.denom) + (1-Y)*log(1-pvec.denom)
+                             + dnorm(x=W, mean=X.star,sd=sd1, log=TRUE) +
+                               dt(x=X.star, df=df1, ncp=0,log=TRUE))
+    
+   #GT.lnumer.persamp<- dbinom(x=Y, size=1, prob=1/(1+exp(-ith.beta*X.star)), log=TRUE) 
+    #+ dnorm(x=W, mean=X.star,sd=sd1, log=TRUE) +
+    #dt(x=X.star, df=df1, ncp=0,log=TRUE))  --> this part cancels!
+    
+    #GT.ldenom.persamp <-  dbinom(x=Y, size=1, prob=1/(1+exp(-beta*X.star)), log=TRUE)
+    
+    GT.logdiff[j] <- sum(GT.lnumer.persamp-GT.ldenom.persamp)
+  }
+  
+  ratio.prof.vec.star <- exp(GT.logdiff)
+  prof.vec[i] <- mean(ratio.prof.vec.star)
+  
+}
+GTdf <- data.frame(beta.profs=beta.profs, rel.prof=prof.vec)
+#beta.max <- beta.profs[prof.vec==max(prof.vec)]
+#beta <- beta.max
+
+
+
+
+#### ---------------------------------------------------------------------------
+#### Save files for plots
+# OP.LNmc       <- gridmcdf
+# OP.LNtmb      <- test4
+# OP.LNgt       <- GTdf
+# OP.LNDCwaldCI <- data.frame(x=as.vector(Beta.hatLN.CI))
+# OP.LN.DCmle   <- beta
+# save(parms.invlog, out.simLN, beta,
+#      OP.LNmc, OP.LNtmb, OP.LNgt, OP.LNgt, OP.LNDCwaldCI, file="LN-OnePar_plotdata.RData")
+# save.image( file="LN-OnePar_image.RData" )
+
+```
+
+
+# Plotting the MC profile with the GT profile
+```{r echo=TRUE,  eval=FALSE}
+
+
+#### ---------------------------------------------------------------------------
+#### Plotting the MC profile with the GT profile
+LN2 <- ggplot(gridmcdf, aes(Beta.values, Rel.Prof.Like) ) + 
+  geom_line(linewidth=1, aes(linetype ="black.line"), color="black") + xlim( c(-3,1) ) +
+  labs( x=bquote("Values of" ~ beta), y="Relative Likelihood", title = "B") +
+  geom_line(data = GTdf, aes( x=beta.profs, y=rel.prof, linetype="red.line"), color = "red", linewidth=1) +
+   
+  geom_line(data=data.frame(x=as.vector(Beta.hatLN.CI), y=c(0,0)), aes(x=x,y=y, linetype = "blue.line"), color = "blue", linewidth=2) +
+  geom_vline(linetype="dotted",linewidth=0.95, mapping = aes(linetype = "black.line2", xintercept = Beta.hat), color = "black")+
+ 
+  geom_hline(linetype="dotted",linewidth=0.9, mapping = aes(linetype="gray.line", yintercept = exp(-qchisq(p=0.95,df=1)/2)), color = "gray")+ 
+   scale_linetype_manual(name = "", values = c(red.line = 2, black.line = 1, blue.line = 1, black.line2 = 1, gray.line =2), 
+                          labels = c(red.line = "GT", black.line = "MC", blue.line = "DC-CI", black.line2 = "MLE", gray.line = bquote("exp(-0.5"~ chi[0.95]^2~")")), 
+                          limits = c("red.line", "black.line", "blue.line", "black.line2", "gray.line"), 
+                          guide = guide_legend(override.aes = list(color = c("red", "black", "blue", "black", "gray"), linetype = c("dotted","solid","solid",    "dotted","dotted"), linewidth = c(1, 1,1, 1,1) )) ) +
+  theme_classic() + 
+  theme(text = element_text(size=15),
+             panel.grid.major = element_blank(),
+             panel.grid.minor = element_blank(),
+             strip.background = element_blank(),
+             axis.ticks.length=unit(0.2, "cm"), legend.position = "bottom")
+
+  
+#### ---------------------------------------------------------------------------
+LN.all <- ggplot(gridmcdf, aes(Beta.values, Rel.Prof.Like) ) + 
+  geom_line(linewidth=1, aes(linetype ="black.line"), color="black") + xlim( c(-3,1) ) +
+  labs( x=bquote("Values of" ~ beta), y="Relative Likelihood", title = "") +
+  geom_line(data = test4$prof, aes( x=param, y=rel.like, linetype="red.line"), color = "black", linewidth=1) +
+  geom_line(data = GTdf, aes( x=beta.profs, y=rel.prof, linetype="anothered.line"), color = "black", linewidth=1) +
+     
+  geom_line(data=data.frame(x=as.vector(Beta.hatLN.CI), y=c(0,0)), aes(x=x,y=y, linetype = "blue.line"), color = "black", linewidth=2)+
+  geom_vline(linetype=5,linewidth=0.95, mapping = aes(linetype = "black.line2", xintercept = -0.4623555), color = "black")+
+ 
+  geom_hline(linetype=6,linewidth=0.9, mapping = aes(linetype="gray.line", yintercept = exp(-qchisq(p=0.95,df=1)/2)), color = "black")+ 
+   scale_linetype_manual(name = "", values = c(red.line = 4, anothered.line=2, black.line = 3, blue.line = 1, black.line2 = 5, gray.line =6), 
+                          labels = c(red.line = "TMB", anothered.line="GT", black.line = "MC", blue.line = "DC-CI", black.line2 = "MLE", gray.line = bquote("exp(-0.5"~ chi[0.95]^2~")")), 
+                          limits = c("red.line","anothered.line" ,"black.line", "blue.line", "black.line2", "gray.line"), 
+                          guide = guide_legend(override.aes = list(color = rep("black",6), linetype = c(4,2,3,1,5,6), linewidth = c(1,1,1, 2,1,1) )) ) +
+  theme_classic() + 
+  theme(text = element_text(size=15),
+             panel.grid.major = element_blank(),
+             panel.grid.minor = element_blank(),
+             strip.background = element_blank(),
+             legend.key.width = unit(4, "line"),        
+             axis.ticks.length=unit(0.2, "cm"), legend.position = "bottom")   
+  
+
+
+
+# save(LN1,file="LN1v2.RData")
+# save(LN2,file="LN2v2.RData")
+# save(LN.all, file="LNall.RData")  
+  
+
+# GTdf <- data.frame(beta.profs=beta.profs, rel.prof=prof.vec)
+# tmbdataframe <- data.frame(param=testLN$prof$param, rel.like=testLN$prof$rel.like)
+# save.image("LN-Onepar.RData")
+
+
+```
+
+```{r echo=FALSE, fig.width=10, fig.height=8, fig.align='center'}
+knitr::include_graphics("LN2.png", dpi = 500)
+```
+
+
+
+Remove previous object file and DLL if present
+```{r}
+#### ---------------------------------------------------------------------------
+dyn.unload(dynlib(model_name))
+
+if (length(list.files(pattern = "\\.o$", full.names = TRUE))>0) {
+  file.remove(list.files(pattern = "\\.o$", full.names = TRUE))
+}
+if (length(list.files(pattern = "\\.so$", full.names = TRUE))>0) {
+  file.remove(list.files(pattern = "\\.so$", full.names = TRUE))
+}
+if (length(list.files(pattern = "\\.cpp$", full.names = TRUE))>0) {
+  file.remove(list.files(pattern = "\\.cpp$", full.names = TRUE))
+}
+#
+```

@@ -1,0 +1,330 @@
+---
+title: "Normal model with nonidentifiable variance"
+author: 
+- "Subhash Lele"
+- "C George Glen"
+- "Jose Miguel Ponciano"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Normal model with nonidentifiable variance
+First we load the necessary function libraries
+```{r message=FALSE, warning=FALSE}
+#### ---------------------------------------------------------------------------
+#### Load functions
+
+
+
+# functions
+tausigsq <- function(N, sigsq, tausq) (sigsq*tausq)/( tausq + sigsq )
+sdtausq <- function(param,psi.fix){
+  tausq = exp(param[[2]])**2
+  sdsq  = exp(param[[3]])**2
+  psi   = (tausq+sdsq)-psi.fix
+  return(psi)
+}
+
+profile.analytical.TMB = function(par, obj, fpsi, psi.grid,...){
+  lplike.out = matrix(0,length(psi.grid), 2)
+  for (i in 1:length(psi.grid)){
+    tmp = suppressWarnings(alabama::auglag(par=par, fn = obj$fn, gr = obj$gr,
+                                           heq = fpsi, psi.fix=psi.grid[i],
+                                           control.outer =list(trace = F)))
+    lplike.out[i,] = c(psi.grid[i],tmp$val)
+  }
+  lplike.out = data.frame(psi=lplike.out[,1],profile.like=lplike.out[,2])
+  return(lplike.out)
+}
+
+norm_sigmatausqPDF <- function(Y, mu1, sigtausq){
+  #llik <- sum(dnorm( Y, mu, sqrt(sigtausq), log = T ))
+  lvec <- rep(NA, length( Y ))
+  for( i in 1:length( Y ) ){
+    lvec <- 1/( sqrt( 2*pi*(sigtausq) ) ) * 
+      exp( -( (( Y - mu1 )**2) / (2*( sigtausq )) ) ) 
+  }
+  llik  <- sum(log(lvec))
+  return(llik)
+}
+
+norm_tausqPDF <- function(par, Y, tausq){
+  mu1       <- par[1]
+  sigmasq   <- par[2]**2
+  # llik      <- sum(dnorm( Y, mu1, sqrt(sigmasq) + sqrt(tausq), log = T ))
+  
+  lvec <- rep(NA, length( Y ))
+  for( i in 1:length( Y ) ){
+    lvec <- 1/( sqrt( 2*pi*(sigmasq + tausq) ) ) * 
+      exp( -( (( Y - mu1 )**2) / (2*( sigmasq + tausq )) ) ) 
+  }
+  llik  <- sum(log(lvec))
+  return(-llik)
+}
+
+
+main.nonident <- function(N=3, search.initial=T){
+  
+  # save results in a list
+  res <- list()
+  
+  for(j in 1:N){
+    repeat{
+      repeat{
+        test.TMB1 <- tryCatch(
+          {
+            suppressWarnings( run.tmb(profile.par.name="lntau1", 
+                                      search.initial = search.initial, n.search = 500,
+                                      sim.data=sim.data, model="Norm.nonident.var", 
+                                      method.ci="useconfint",
+                                      ytol=10, init = list(par=0, hidden=0.1)) )
+            
+          }, error = function(x){NULL})
+        if( !is.null(test.TMB1) ) break
+      }
+      if( test.TMB1$convergence$pdHess.check == "converged" ) break 
+    }
+    tmb.res   <- sdreport(test.TMB1$fun.obj)
+    
+    # summary( tmb.res, p.value = T ) |> tail()
+    # test.TMB1$convergence; 
+    # test.TMB1$results
+    
+    res[[j]] <- list( tmb.out=test.TMB1)
+  }
+  
+  
+  ### identifiable parameter
+  ident.par <- (parms.err.vars1$sd1**2+parms.err.vars1$tau1**2)
+  
+  ### function to compute the pCI for sdtau using alabama for constrained optimization
+  bracket <- 5
+  
+  #### compute the profile using auglag
+  psi.grid.tmb <- seq( 0.001, ident.par+bracket, length.out=100 )
+  ana.profile.sdtau <- profile.analytical.TMB(par=c(0,0,0),
+                                              obj=test.TMB1$fun.obj, fpsi=sdtausq,
+                                              psi.grid=psi.grid.tmb,
+                                              control.outer = list(method="BFGS", itmax=5000, NMinit=1))
+  ana.profile.sdtau$profile.like  <- exp(-ana.profile.sdtau$profile.like + as.numeric(min(ana.profile.sdtau$profile.like)))
+  
+  ### draw the unconditional likelihood of Y ~ N(mu, sigma + tau)
+  prof.par.sigmatausq <- seq( 0.001, sqrt(ident.par)+bracket, length.out=10000 )
+  LLvec.sigmatausq    <- as.numeric()
+  for(i in seq_along(prof.par.sigmatausq)){
+    LLvec.sigmatausq[i] <- norm_sigmatausqPDF(Y=sim.data[,2],
+                                              mu=parms.err.vars1$mu1,
+                                              sigtausq = prof.par.sigmatausq[i])
+  }
+  prof.like.sigmatausq <- exp(LLvec.sigmatausq - max(LLvec.sigmatausq))
+  
+  ### draw the true profile for tausq 
+  prof.par.tausq <- seq(0, ident.par+bracket, by=0.01)
+  LLvec.tausq    <- as.numeric() 
+  for(i in seq_along(prof.par.tausq)){
+    LLvec.tausq[i] <- -optim( fn=norm_tausqPDF, Y=sim.data[,2], 
+                              par = c(0.1,1), tausq=prof.par.tausq[i])$value
+  }
+  LLvec.tausq <- unlist(LLvec.tausq)
+  prof.like.tausq <- exp(LLvec.tausq - max(LLvec.tausq))
+  
+  ### final model results
+  supp.res=list(analytical.out=ana.profile.sdtau, 
+                ident.par=ident.par, 
+                prof.par.sigmatausq=prof.par.sigmatausq, 
+                prof.like.sigmatausq=prof.like.sigmatausq,
+                prof.par.tausq=prof.par.tausq, 
+                prof.like.tausq=prof.like.tausq,
+                true.parms=parms.err.vars1)
+  res.out <- list( TMBres=res, Ares=supp.res)
+  
+  return(res.out)
+}
+
+### source files
+source("TestingLaplaceTMB.functions7.0.R")
+source("TestingLaplaceTMB.models2.0.R")
+source("TestingLaplaceToolkit4.0.R")
+
+#### ---------------------------------------------------------------------------
+#### Load libraries
+library(ggplot2)
+library(patchwork)
+library(knitr)
+library(boot)
+```
+
+```{r echo=TRUE,  eval=FALSE}
+
+#### ---------------------------------------------------------------------------
+#### Generate data
+## normal model with non-identifiable variance components
+n               <- 100
+parms.err.vars1 <- list(mu1=1, sd1=sqrt(4.3), tau1=sqrt(0.9))
+fulldf          <- sim.example(n=n, parm.list=parms.err.vars1, model="Norm.nonident.var")
+sim.data <- fulldf[,c("X1","Y")]
+
+
+
+
+#### ---------------------------------------------------------------------------
+N <- 50
+out <- main.nonident(N=N, search.initial=T)
+lapply(1:N, function(x) out$TMBres[[x]]$tmb.out$convergence$pdHess.check ) |> unlist()
+lapply(1:N, function(x) diagnose(fit=out$TMBres[[x]]$tmb.out)) |> unlist()
+
+out$TMBres[[1]]$tmb.out$results
+out$TMBres[[1]]$tmb.out$convergence
+
+## check if anything looks odd
+diagnose(out$TMBres[[1]]$tmb.out)
+
+
+
+#### ---------------------------------------------------------------------------
+### Plot
+keep <- which(lapply(1:N, function(x) out$TMBres[[x]]$tmb.out$convergence$pdHess.check ) |> unlist() == "converged")
+keep.out <- sapply(keep, function(x) out$TMBres[[x]])
+
+
+keep.plot <- sapply(c(12,13,18,22), function(x) out$TMBres[x])
+plot.res <- list( plot.tmb=keep.plot, Ares=out$Ares  )
+# save(plot.res, file="Fig5Data.RData")
+
+
+
+N <- length(out)
+par(oma=c(1,1,1,1), mar=c(5,5,2,4), mfrow=c(3,3))
+#out <- keep.out
+
+for( j in 1:length(keep)){
+  
+  i <- keep[j]; print(i)
+  #i <- j
+  
+  plot( exp(out$TMBres[[i]]$tmb.out$ci.obj$data$lntau1)**2, 
+        out$TMBres[[i]]$tmb.out$ci.obj$data$rel.like, 
+        type="l", lwd=2, xlim=c(0, 12), 
+        xlab=bquote("Values of" ~ tau^2), ylab="Relative Profile Likelihood", bty="l",
+        cex.lab=1.5);
+  
+  rect(xleft = 0, xright = out$Ares$ident.par, 
+       ybottom = 0, ytop =1, 
+       border = NA, col = adjustcolor("blue", alpha = 0.1))
+  
+  lines( out$Ares$analytical.out$psi, out$Ares$analytical.out$profile.like, 
+         type="l", col="blue", lty=2, lwd=2);
+  
+  segments(y0=exp(-qchisq(0.95,1)/2), y1 =exp(-qchisq(0.95,1)/2),
+           x0 = min(out$Ares$analytical.out$psi[out$Ares$analytical.out$profile.like > exp(-qchisq(0.95,1)/2)]),
+           x1 = max(out$Ares$analytical.out$psi[out$Ares$analytical.out$profile.like > exp(-qchisq(0.95,1)/2)]),
+           lwd=2, col = "grey40", lty = par("lty"))
+  
+  lines( out$Ares$prof.par.sigmatausq, out$Ares$prof.like.sigmatausq, type="l", col="red", lty=3, lwd=2)
+  lines( out$Ares$prof.par.tausq, out$Ares$prof.like.tausq, type="l", col="darkgreen", lty=3, lwd=2)
+  
+  abline( v= (out$Ares$true.parms$sd1**2+out$Ares$true.parms$tau1**2), lty=4, col="black" )
+  abline(v=out$Ares$true.parms$tau1**2, lty=5)
+}
+
+
+legend("topright", legend = c( expression("TMB profile for" ~ tau**2), 
+                               expression("Derived TMB profile for" ~ tau**2 + sigma**2),
+                               expression("True profile for" ~ tau**2 + sigma**2),
+                               expression("True profile for" ~ tau**2),
+                               expression("True value for" ~ tau**2),
+                               expression("ML estimate for" ~ tau**2 + sigma**2),
+                               expression("95% Wald-type CI for" ~ tau**2 + sigma**2)),
+       pch = c(NA, NA, NA), lty = c(1,2,3,3,4,5,1), lwd = c(2,2,2,2,2,2,3), inset=c(0,0),
+       col = c("black","blue","red","darkgreen","black","black","grey40"), bty="n", cex=0.8, y.intersp=0.8)
+
+
+
+
+
+## plot using ggplot
+library(ggplot2)
+lt=c("solid", "dashed", "dotted", "dotdash", "longdash", "twodash", "F1")
+
+i <- 3
+NIDVarPlot.data <- out$TMBres[[i]]$tmb.out$ci.obj$data
+NIDVarPlot <- ggplot(NIDVarPlot.data, aes(exp(lntau1)**2, rel.like) ) + 
+  
+  geom_rect(aes( xmin = 0, xmax = out$Ares$ident.par, ymin = 0, ymax =1), 
+            fill = "grey80", col = NA, alpha=0.1 ) +
+  
+  geom_line(linewidth=1, aes(linetype ="lineTMBtau"), color="black") +
+  geom_line(data=out$Ares$analytical.out, 
+            aes(x=psi, y=profile.like, linetype ="lineTMBtausigma"),
+            linewidth=1, color="black") +
+  geom_line(data=data.frame(x=out$Ares$prof.par.sigmatausq, 
+                            y=out$Ares$prof.like.sigmatausq), 
+            aes(x=x, y=y, linetype ="lineTrueTauSigma"),
+            linewidth=1, color="black") +
+  geom_line(data=data.frame(x=out$Ares$prof.par.tausq, 
+                            y=out$Ares$prof.like.tausq), 
+            aes(x=x, y=y, linetype ="lineTrueTau"),
+            linewidth=1, color="black") +
+  geom_vline(linewidth=0.95, color = "black",
+             mapping = aes(linetype = "TrueTauSigma", 
+                           xintercept = out$Ares$true.parms$sd1**2+out$Ares$true.parms$tau1**2),
+             show.legend =TRUE, key_glyph = "path") +
+  geom_vline(linewidth=0.95, color = "black", 
+             mapping = aes(linetype = "TrueTau", xintercept = out$Ares$true.parms$tau1**2),
+             show.legend =TRUE, key_glyph = "path") +
+  
+  geom_segment(aes( y=exp(-qchisq(0.95,1)/2), 
+                    yend =exp(-qchisq(0.95,1)/2),
+                    x = min(out$Ares$analytical.out$psi[out$Ares$analytical.out$profile.like > exp(-qchisq(0.95,1)/2)]),
+                    xend = max(out$Ares$analytical.out$psi[out$Ares$analytical.out$profile.like > exp(-qchisq(0.95,1)/2)]),
+                    linetype = "CI95"), lwd=2) +
+  xlim(0,10) +
+  labs( x=bquote("Values of" ~ tau^2), y="Relative Likelihood", title = "") +
+  scale_linetype_manual(name = "", 
+                        values = c(lineTMBtau = 4, lineTMBtausigma=2, 
+                                   lineTrueTauSigma = 3, lineTrueTau = 1, 
+                                   TrueTauSigma = 5, TrueTau = 6, 
+                                   CI95 = 7), 
+                        labels = c(lineTMBtau = expression("TMB profile for" ~ tau**2), 
+                                   lineTMBtausigma=expression("Derived TMB profile for" ~ tau**2 + sigma**2), 
+                                   lineTrueTauSigma = expression("True profile for" ~ tau**2 + sigma**2), 
+                                   lineTrueTau = expression("True profile for" ~ tau**2), 
+                                   TrueTauSigma = expression("ML estimate for" ~ tau**2 + sigma**2), 
+                                   TrueTau = expression("True value for" ~ tau**2),
+                                   CI95 = expression("95% Wald-type CI for" ~ tau**2 + sigma**2)), 
+                        limits = c("lineTMBtau","lineTMBtausigma",
+                                   "lineTrueTauSigma", "lineTrueTau", 
+                                   "TrueTauSigma", "TrueTau","CI95"), 
+                        guide = guide_legend(override.aes = list(color = rep("black",7), 
+                                                                 linetype = c(lt[4], lt[2], lt[3], lt[1], 
+                                                                              lt[5], lt[6], lt[7]), 
+                                                                 linewidth = c(1,1,1,1,1,1,2) )) ) +
+  theme_classic() + 
+  theme(text = element_text(size=15),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank(),
+        legend.key.width = unit(4, "line"),        
+        axis.ticks.length=unit(0.2, "cm"), legend.position = "bottom") 
+NIDVarPlot
+#ggsave(filename="Figure5.png", plot=NIDVarPlot, width = 15, height=9)  
+
+
+```
+
+
+Remove previous object file and DLL if present
+```{r}
+#### ---------------------------------------------------------------------------
+dyn.unload(dynlib(model_name))
+
+if (length(list.files(pattern = "\\.o$", full.names = TRUE))>0) {
+  file.remove(list.files(pattern = "\\.o$", full.names = TRUE))
+}
+if (length(list.files(pattern = "\\.so$", full.names = TRUE))>0) {
+  file.remove(list.files(pattern = "\\.so$", full.names = TRUE))
+}
+if (length(list.files(pattern = "\\.cpp$", full.names = TRUE))>0) {
+  file.remove(list.files(pattern = "\\.cpp$", full.names = TRUE))
+}
+#

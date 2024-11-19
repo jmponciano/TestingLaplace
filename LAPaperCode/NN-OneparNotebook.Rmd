@@ -1,0 +1,230 @@
+---
+title: "Normal-Normal, one parameter"
+author: 
+- "Subhash Lele"
+- "C George Glen"
+- "Jose Miguel Ponciano"
+date: "`r Sys.Date()`"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Normal Normal model, one parameter
+First we upload the necessary function libraries
+```{r message=FALSE}
+
+#### ---------------------------------------------------------------------------
+#### Load functions
+source("TestingLaplaceToolkit4.0.R")
+source("TestingLaplaceTMB.functions7.0.R") 
+source("TestingLaplaceTMB.models2.0.R")
+
+#### ---------------------------------------------------------------------------
+#### Load libraries
+library(ggplot2)
+library(patchwork)
+library(knitr)
+```
+1. Normal linear regression example
+
+a) Comparison of the the MC likelihood function with TMB
+
+```{r}
+
+#### ---------------------------------------------------------------------------
+#### Generate data
+parms.err.varsNN <- list(beta=-1, df1=2, sd1=3,sd2=2)
+out.simNN <- sim.example(n=100, parm.list=parms.err.varsNN, model="Bivar.Norm")
+
+
+#### ---------------------------------------------------------------------------
+#### Fit model using data cloning
+ModNN.dc.beta <- onedcfitrun(model="Bivar.Norm", true.parms=parms.err.varsNN,
+                             sim.data = out.simNN,n.iter=50000,n.adapt=100,
+                             n.update=100,thin=10, n.chains=3,clones.seq=c(1,2,4,16))
+Beta.hat <- summary(ModNN.dc.beta)[[1]][1]
+print(Beta.hat)
+
+#### ---------------------------------------------------------------------------
+# DC Wald-type CI
+Beta.hatNN.CI <- confint(ModNN.dc.beta)
+
+
+# kable(round(dcdiag(ModNN.dc.beta),digits=4),
+#       caption="Diagnostics for Data Cloning runs using multiple clones to assess convergence")
+
+
+#### ---------------------------------------------------------------------------
+# True (assuming all other parms known) profile likelihood for beta using Monte Carlo
+MCprof.ModNN <- MCprofile1d(B=50000, parm.list=parms.err.varsNN, sim.data=out.simNN, 
+                            bracket=6,prec.prof=0.01,model="Bivar.Norm", 
+                            plot.it=FALSE,overlay=FALSE)
+
+
+
+#### ---------------------------------------------------------------------------
+# Now computing the TMB profile:
+parms4tmb <- list(beta=parms.err.varsNN$beta, df1=parms.err.varsNN$df1,
+                  lnsd1 = log(parms.err.varsNN$sd1), lnsd2=log(parms.err.varsNN$sd2))
+test <- run.tmb(profile.par.name="beta", profile.par=MCprof.ModNN[,1], 
+                known.parm=parms4tmb, sim.data=out.simNN, model="Bivar.Norm")
+
+
+#### ---------------------------------------------------------------------------
+# Plot the MC profile with the TMB profile
+par(oma=c(1,1,1,1), mar=c(4,5,2,2))
+plot(MCprof.ModNN[,1],MCprof.ModNN[,2], type="l", col="black", lwd=2, xlim=c(-3,1),
+     xlab=bquote("Values of" ~ beta), ylab="Relative Likelihood", bty="l", 
+     cex.lab=1.5)
+points(test$param, test$rel.like, type="l",col="red", lty=2, lwd=2);
+points(x=Beta.hatNN.CI,y=c(0,0), col="blue", type="l" ,lty=1,lwd=4)
+abline(v=Beta.hat, lwd=2,lty=2)
+abline(h=exp(-qchisq(p=0.95,df=1)/2),lty=2, col="gray")
+legend("topright", legend=c("TMB", "MC", "MLE","DC-CI",bquote("exp(-0.5"~ chi[0.95]^2~")")), col=c("red", "black","black", "blue","gray"), lty=c(2,1,2,1,2), lwd=c(2,2,2,4,1), bty="n", cex=1.15)
+
+
+#### ---------------------------------------------------------------------------
+#### Plot
+NN1 <- ggplot(data.frame(MCprof.ModNN), aes(Beta.values, Rel.Prof.Like) ) + 
+  geom_line(linewidth=1, aes(linetype ="black.line"), color="black") + xlim( c(-3,1) ) +
+  labs( x=bquote("Values of" ~ beta), y="Relative Likelihood", title = "A") +
+  geom_line(data = test$prof, aes( x=param, y=rel.like, linetype="red.line"), color = "red", linewidth=1) +
+  
+  geom_line(data=data.frame(x=as.vector(Beta.hatNN.CI), y=c(0,0)), aes(x=x,y=y, linetype = "blue.line"), color = "blue", linewidth=2)+
+  geom_vline(linetype="dotted",linewidth=0.95, mapping = aes(linetype = "black.line2", xintercept = Beta.hat), color = "black")+
+  
+  geom_hline(linetype="dotted",linewidth=0.9, mapping = aes(linetype="gray.line", yintercept = exp(-qchisq(p=0.95,df=1)/2)), color = "gray")+ 
+  scale_linetype_manual(name = "", values = c(red.line = 2, black.line = 1, blue.line = 1, black.line2 = 1, gray.line =2), 
+                        labels = c(red.line = "TMB", black.line = "MC", blue.line = "DC-CI", black.line2 = "MLE", gray.line = bquote("exp(-0.5"~ chi[0.95]^2~")")), 
+                        limits = c("red.line", "black.line", "blue.line", "black.line2", "gray.line"), 
+                        guide = guide_legend(override.aes = list(color = c("red", "black", "blue", "black", "gray"), linetype = c("dotted","solid","solid",    "dotted","dotted"), linewidth = c(1, 1,1, 1,1) )) ) +
+  theme_classic() + 
+  theme(text = element_text(size=15),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank(),
+        axis.ticks.length=unit(0.2, "cm"), legend.position = "bottom") 
+NN1
+
+```
+
+
+b) Compare the MC likelihood function with GT
+
+```{r}
+
+#### ---------------------------------------------------------------------------
+new.par.listNN <- parms.err.varsNN
+new.par.listNN$beta <- Beta.hat
+
+
+
+#### ---------------------------------------------------------------------------
+# Sampling from f(X|(Y,W))
+Xpost.ModNN <- Xpost.samp(model="Bivar.Norm", parm.list=new.par.listNN,
+                          sim.data=out.simNN, n.iter=51000,n.adapt=1000,
+                          n.update=1000,thin=5,n.chains=5)
+
+Xpost.binned <- do.call(rbind,Xpost.ModNN)
+
+
+
+#### ---------------------------------------------------------------------------
+# Running the GT algorithm
+ModelNN.GTprof <- GT.prof(model="Bivar.Norm", parm.list=new.par.listNN,sim.data=out.simNN,
+                          XpostSample=Xpost.binned, bracket=2, prec.prof=0.01,
+                          plot.it=FALSE, overlay=TRUE,mycol="blue",
+                          dotted=1)
+
+
+
+#### ---------------------------------------------------------------------------
+### Save files for plots
+OP.NNmc       <- data.frame(MCprof.ModNN)
+OP.NNtmb      <- test
+OP.NNgt       <- data.frame(ModelNN.GTprof)
+OP.NNDCwaldCI <- data.frame(x=as.vector(Beta.hatNN.CI))
+# save(parms.err.varsNN, new.par.listNN, out.simNN,OP.NNmc, OP.NNtmb, OP.NNgt, OP.NNgt, OP.NNDCwaldCI, file="NN-OnePar_plotdata.RData")
+# save.image( file="NN-OnePar_image.RData" )
+
+
+
+
+#### ---------------------------------------------------------------------------
+# Plotting the MC profile with the GT profile
+NN2 <- ggplot(data.frame(MCprof.ModNN), aes(Beta.values, Rel.Prof.Like) ) + 
+  geom_line(linewidth=1, aes(linetype ="black.line"), color="black") + xlim( c(-3,1) ) +
+  labs( x=bquote("Values of" ~ beta), y="Relative Likelihood", title = "B") +
+  geom_line(data = data.frame(ModelNN.GTprof), aes( x=beta.profs, y=rel.prof, linetype="red.line"), color = "red", linewidth=1) +
+  
+  geom_line(data=data.frame(x=as.vector(Beta.hatNN.CI), y=c(0,0)), aes(x=x,y=y, linetype = "blue.line"), color = "blue", linewidth=2)+
+  geom_vline(linetype="dotted",linewidth=0.95, mapping = aes(linetype = "black.line2", xintercept = Beta.hat), color = "black")+
+  
+  geom_hline(linetype="dotted",linewidth=0.9, mapping = aes(linetype="gray.line", yintercept = exp(-qchisq(p=0.95,df=1)/2)), color = "gray")+ 
+  scale_linetype_manual(name = "", values = c(red.line = 2, black.line = 1, blue.line = 1, black.line2 = 1, gray.line =2), 
+                        labels = c(red.line = "GT", black.line = "MC", blue.line = "DC-CI", black.line2 = "MLE", gray.line = bquote("exp(-0.5"~ chi[0.95]^2~")")), 
+                        limits = c("red.line", "black.line", "blue.line", "black.line2", "gray.line"), 
+                        guide = guide_legend(override.aes = list(color = c("red", "black", "blue", "black", "gray"), linetype = c("dotted","solid","solid",    "dotted","dotted"), linewidth = c(1, 1,1, 1,1) )) ) +
+  theme_classic() + 
+  theme(text = element_text(size=15),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank(),
+        axis.ticks.length=unit(0.2, "cm"), legend.position = "bottom") 
+NN2
+
+
+#### ---------------------------------------------------------------------------
+#### Full plot
+NN.all <- ggplot(data.frame(MCprof.ModNN), aes(Beta.values, Rel.Prof.Like) ) + 
+  geom_line(linewidth=1, aes(linetype ="black.line"), color="black") + xlim( c(-3,1) ) +
+  labs( x=bquote("Values of" ~ beta), y="Relative Likelihood", title = "") +
+  geom_line(data = test$prof, aes( x=param, y=rel.like, linetype="red.line"), color = "black", linewidth=1) +
+  geom_line(data = data.frame(ModelNN.GTprof), aes( x=beta.profs, y=rel.prof, linetype="anothered.line"), color = "black", linewidth=1) +
+  
+  geom_line(data=data.frame(x=as.vector(Beta.hatNN.CI), y=c(0,0)), aes(x=x,y=y, linetype = "blue.line"), color = "black", linewidth=2)+
+  geom_vline(linetype=5,linewidth=0.95, mapping = aes(linetype = "black.line2", xintercept = -0.9874187), color = "black")+
+  
+  geom_hline(linetype=6,linewidth=0.9, mapping = aes(linetype="gray.line", yintercept = exp(-qchisq(p=0.95,df=1)/2)), color = "black")+ 
+  scale_linetype_manual(name = "", values = c(red.line = 4, anothered.line=2, black.line = 3, blue.line = 1, black.line2 = 5, gray.line =6), 
+                        labels = c(red.line = "TMB", anothered.line="GT", black.line = "MC", blue.line = "DC-CI", black.line2 = "MLE", gray.line = bquote("exp(-0.5"~ chi[0.95]^2~")")), 
+                        limits = c("red.line","anothered.line" ,"black.line", "blue.line", "black.line2", "gray.line"), 
+                        guide = guide_legend(override.aes = list(color = rep("black",6), linetype = c(4,2,3,1,5,6), linewidth = c(1,1,1, 2,1,1) )) ) +
+  theme_classic() + 
+  theme(text = element_text(size=15),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank(),
+        legend.key.width = unit(4, "line"),        
+        axis.ticks.length=unit(0.2, "cm"), legend.position = "bottom")     
+NN.all
+
+# save(NN1,file="NN1v2.RData")
+# save(NN2,file="NN2v2.RData")
+# save(NN.all, file="NNall.RData")  
+# save.image(file="NN-OnePar.RData")  
+
+```
+
+
+
+Remove previous object file and DLL if present
+```{r}
+#### ---------------------------------------------------------------------------
+dyn.unload(dynlib(model_name))
+
+if (length(list.files(pattern = "\\.o$", full.names = TRUE))>0) {
+  file.remove(list.files(pattern = "\\.o$", full.names = TRUE))
+}
+if (length(list.files(pattern = "\\.so$", full.names = TRUE))>0) {
+  file.remove(list.files(pattern = "\\.so$", full.names = TRUE))
+}
+if (length(list.files(pattern = "\\.cpp$", full.names = TRUE))>0) {
+  file.remove(list.files(pattern = "\\.cpp$", full.names = TRUE))
+}
+#
+```
+

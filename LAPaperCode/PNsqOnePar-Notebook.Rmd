@@ -1,0 +1,337 @@
+---
+title: "Poisson-Normal Squared model"
+author: 
+- "Subhash Lele"
+- "C George Glen"
+- "Jose Miguel Ponciano"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Poisson-Normal Squared, one parameter
+First we upload the necessary function libraries
+```{r message=FALSE, warning=FALSE}
+#### ---------------------------------------------------------------------------
+#### Load functions
+source("TestingLaplaceToolkit4.0.R")
+source("TestingLaplaceTMB.functions7.0.R") 
+source("TestingLaplaceTMB.models2.0.R") 
+
+#### ---------------------------------------------------------------------------
+#### Load libraries
+library(ggplot2)
+library(patchwork)
+library(knitr)
+library(boot)
+```
+
+```{r echo=TRUE, eval=FALSE}
+
+#### ---------------------------------------------------------------------------
+# Simulating from Model 3: Latent: X ~ Normal(mu, sd1), U = X^2 (~Chi-square(1))
+# Observation model: Y ~ Poisson(lambda=U)
+parms.Usq <- list(mu=-1, sd1=5)
+out.simUsq <- sim.example(n=300, parm.list=parms.Usq, model="Normsq.Pois")
+
+
+#### ---------------------------------------------------------------------------
+# DC run to estimate beta assuming all other parameters are known
+ModUsq.dc.beta <- onedcfitrun(model="Normsq.Pois", true.parms=parms.Usq,
+                              sim.data = out.simUsq,n.iter=5000,n.adapt=100,
+                              n.update=100,thin=1, n.chains=4,clones.seq=c(1,2,8,16))
+
+
+kable(round(dcdiag(ModUsq.dc.beta),digits=4), caption="Diagnostics for Data Cloning runs using multiple clones to assess convergence")
+
+Beta.hat <- summary(ModUsq.dc.beta)[[1]][1]
+# Or simply use 
+Beta.hatUsq.CI <- confint(ModUsq.dc.beta)
+
+
+
+#### ---------------------------------------------------------------------------
+# True MC-profile likelihood (i.e. computing knowing true parameter
+# values for the distribution of the hidden process)
+# Model 3: X~Normal, Y~Poisson(X^2)
+MCprof.ModUsq <- MCprofile1d(B=150000, parm.list=parms.Usq, sim.data=out.simUsq, 
+                             bracket=8,prec.prof=0.02, model="Normsq.Pois",
+                             plot.it=FALSE,overlay=FALSE)
+
+
+#### ---------------------------------------------------------------------------
+# LOESS smoothing of MC profile
+psi.grid <-  seq(Beta.hat-6,Beta.hat+10,0.01)
+MCdata <- data.frame(beta_values=MCprof.ModUsq[,1],RelPL=MCprof.ModUsq[,2])
+tmp <- loess(RelPL ~ beta_values,data=MCdata, span=0.08)
+newdata.4Mod <- data.frame(beta_values=psi.grid)
+MCprof.smooth <- predict(tmp,newdata=newdata.4Mod)
+where.nas <- which(is.na(MCprof.smooth), arr.ind=TRUE)
+MCprof.plot <- MCprof.smooth[-where.nas]/max(MCprof.smooth[-where.nas])
+psi.grid.plot <- psi.grid[-where.nas]
+gridmcdf <- data.frame(Beta.values=psi.grid.plot, Rel.Prof.Like = MCprof.plot)
+
+
+
+#### ---------------------------------------------------------------------------
+## TMB
+parms4tmb <- list(mu=parms.Usq$mu, lnsd1 = log(parms.Usq$sd1))
+
+testUsq <- run.tmb(profile.par.name="mu", profile.par=MCprof.ModUsq[,1], 
+                   known.parm=parms4tmb, sim.data=out.simUsq, model="Normsq.Pois")
+
+
+
+#### ---------------------------------------------------------------------------
+# Plot the MC profile with the TMB profile
+PNsq1 <- ggplot(gridmcdf, aes(Beta.values, Rel.Prof.Like) ) + 
+  geom_line(linewidth=1, aes(linetype ="black.line"), color="black") + xlim( c(-10,8) ) +
+  labs( x=bquote("Values of" ~ beta), y="Relative Likelihood", title = "A") +
+  geom_line(data = testUsq, aes( x=param, y=rel.like, linetype="red.line"), color = "red", linewidth=1) +
+  
+  geom_line(data=data.frame(x=as.vector(Beta.hatUsq.CI), y=c(0,0)), aes(x=x,y=y, linetype = "blue.line"), color = "blue", linewidth=2)+
+  geom_vline(linetype="dotted",linewidth=0.95, mapping = aes(linetype = "black.line2", xintercept = Beta.hat), color = "black")+
+  
+  geom_hline(linetype="dotted",linewidth=0.9, mapping = aes(linetype="gray.line", yintercept = exp(-qchisq(p=0.95,df=1)/2)), color = "gray")+ 
+  scale_linetype_manual(name = "", values = c(red.line = 2, black.line = 1, blue.line = 1, black.line2 = 1, gray.line =2), 
+                        labels = c(red.line = "TMB", black.line = "MC", blue.line = "DC-CI", black.line2 = "MLE", gray.line = bquote("exp(-0.5"~ chi[0.95]^2~")")), 
+                        limits = c("red.line", "black.line", "blue.line", "black.line2", "gray.line"), 
+                        guide = guide_legend(override.aes = list(color = c("red", "black", "blue", "black", "gray"), linetype = c("dotted","solid","solid",    "dotted","dotted"), linewidth = c(1, 1,1, 1,1) )) ) +
+  theme_classic() + 
+  theme(text = element_text(size=15),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank(),
+        axis.ticks.length=unit(0.2, "cm"), legend.position = "bottom") 
+
+```
+
+```{r echo=FALSE, fig.width=10, fig.height=8, fig.align='center'}
+knitr::include_graphics("Usq-correct-01.png", dpi = 500)
+
+```
+
+
+
+b) Comparison of the MC likelihood with GT:
+```{r echo=TRUE, eval=FALSE}
+
+
+#### ---------------------------------------------------------------------------
+parms.Usq$mu <- Beta.hat
+
+# Sampling from the conditional unobserved process
+Xpost.ModUsq <- Xpost.samp(model="Normsq.Pois", parm.list=parms.Usq,
+                           sim.data=out.simUsq, n.iter=50100,n.adapt=1000,
+                           n.update=1000,thin=4,n.chains=5)
+
+Xpost.binned <- do.call(rbind,Xpost.ModUsq)
+
+
+B <- nrow(Xpost.binned)
+
+XpostSample <- Xpost.binned
+
+sd1 <- parms.Usq$sd1
+beta<- parms.Usq$mu
+n <- nrow(out.simUsq)
+Y <- out.simUsq[,1]
+
+beta <- Beta.hat
+bracket <- 6
+
+
+
+#### ---------------------------------------------------------------------------
+# Computing GT's denominator for every sampled X and every value of the
+# parameter 'beta' we are profiling over
+prec.prof <- 0.02
+beta.profs <- seq(from=beta-bracket,to=beta+bracket, by=prec.prof)
+len.prof <- length(beta.profs)
+prof.vec <- rep(0,len.prof)
+
+for(i in 1:len.prof){
+  
+  ith.beta <- beta.profs[i]
+  GT.logdiff <- rep(0,B)
+  
+  for(j in 1:B){
+    X.star <- XpostSample[j,]
+    GT.lnumer.persamp<- sum(dnorm(x=X.star, mean=ith.beta, sd=sd1, log=TRUE))
+    #  +dchisq(x=(X.star^2)/(sd1^2), df=1,ncp=(ith.beta^2), log=TRUE)
+    # + dpois(x=Y, lambda=Usq.star, log=TRUE) --> it cancels
+    
+    GT.ldenom.persamp <-  sum(dnorm(x=X.star, mean=beta, sd=sd1, log=TRUE))
+    # + dchisq(x=(X.star^2)/(sd1^2), df=1,ncp=(beta^2), log=TRUE)
+    # + dpois(x=Y, lambda=Usq.star, log=TRUE) --> it cancels
+    
+    GT.logdiff[j] <- GT.lnumer.persamp-GT.ldenom.persamp
+  }
+  
+  ratio.prof.vec.star <- exp(GT.logdiff)
+  prof.vec[i] <- mean(ratio.prof.vec.star)
+  
+}
+```
+
+When plotted, we see that the GT algorithm gives a peak around the MLE.  The tilting was done using the MLE (-3.849896 here) which is far from the true value.
+```{r echo=TRUE, eval=FALSE}
+
+
+#### ---------------------------------------------------------------------------
+# Plotting the MC profile with the GT profile
+PNsq2 <- ggplot(gridmcdf, aes(Beta.values, Rel.Prof.Like) ) + 
+  geom_line(linewidth=1, aes(linetype ="black.line"), color="black") + xlim( c(-10,8) ) +
+  labs( x=bquote("Values of" ~ beta), y="Relative Likelihood", title = "A") +
+  geom_line(data = data.frame(beta.profs=beta.profs, prof.vec=prof.vec), aes( x=beta.profs, y=prof.vec, linetype="red.line"), color = "red", linewidth=1) +
+  
+  geom_line(data=data.frame(x=as.vector(Beta.hatUsq.CI), y=c(0,0)), aes(x=x,y=y, linetype = "blue.line"), color = "blue", linewidth=2)+
+  geom_vline(linetype="dotted",linewidth=0.95, mapping = aes(linetype = "black.line2", xintercept = Beta.hat), color = "black")+
+  
+  geom_hline(linetype="dotted",linewidth=0.9, mapping = aes(linetype="gray.line", yintercept = exp(-qchisq(p=0.95,df=1)/2)), color = "gray")+ 
+  scale_linetype_manual(name = "", values = c(red.line = 2, black.line = 1, blue.line = 1, black.line2 = 1, gray.line =2), 
+                        labels = c(red.line = "GT", black.line = "MC", blue.line = "DC-CI", black.line2 = "MLE", gray.line = bquote("exp(-0.5"~ chi[0.95]^2~")")), 
+                        limits = c("red.line", "black.line", "blue.line", "black.line2", "gray.line"), 
+                        guide = guide_legend(override.aes = list(color = c("red", "black", "blue", "black", "gray"), linetype = c("dotted","solid","solid",    "dotted","dotted"), linewidth = c(1, 1,1, 1,1) )) ) +
+  theme_classic() + 
+  theme(text = element_text(size=15),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank(),
+        axis.ticks.length=unit(0.2, "cm"), legend.position = "bottom") 
+
+
+
+#### ---------------------------------------------------------------------------
+PNsq.all <- ggplot(gridmcdf, aes(Beta.values, Rel.Prof.Like) ) + 
+  geom_line(linewidth=1, aes(linetype ="black.line"), color="black") + xlim( c(-10,8) ) +
+  labs( x=bquote("Values of" ~ beta), y="Relative Likelihood", title = "") +
+  geom_line(data = testUsq, aes( x=param, y=rel.like, linetype="red.line"), color = "black", linewidth=1) +
+  geom_line(data = data.frame(beta.profs=beta.profs, prof.vec=prof.vec), aes( x=beta.profs, y=prof.vec, linetype="anothered.line"), color = "black", linewidth=1) +
+  
+  geom_line(data=data.frame(x=as.vector(Beta.hatUsq.CI), y=c(0,0)), aes(x=x,y=y, linetype = "blue.line"), color = "black", linewidth=2)+
+  geom_vline(linetype=5,linewidth=0.95, mapping = aes(linetype = "black.line2", xintercept = Beta.hat), color = "black")+
+  
+  geom_hline(linetype=6,linewidth=0.9, mapping = aes(linetype="gray.line", yintercept = exp(-qchisq(p=0.95,df=1)/2)), color = "black")+ 
+  scale_linetype_manual(name = "", values = c(red.line = 4, anothered.line=2, black.line = 3, blue.line = 1, black.line2 = 5, gray.line =6), 
+                        labels = c(red.line = "TMB", anothered.line="GT", black.line = "MC", blue.line = "DC-CI", black.line2 = "MLE", gray.line = bquote("exp(-0.5"~ chi[0.95]^2~")")), 
+                        limits = c("red.line","anothered.line" ,"black.line", "blue.line", "black.line2", "gray.line"), 
+                        guide = guide_legend(override.aes = list(color = rep("black",6), linetype = c(4,2,3,1,5,6), linewidth = c(1,1,1, 2,1,1) )) ) +
+  theme_classic() + 
+  theme(text = element_text(size=15),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank(),
+        legend.key.width = unit(4, "line"),        
+        axis.ticks.length=unit(0.2, "cm"), legend.position = "bottom") 
+# ggsave(filename="Figure3.png", plot=PNsq.all,width = 12, height=8)  
+
+
+# save(PNsq1v2,file="PNsq1.RData")
+# save(PNsq2v2,file="PNsq2.RData")
+# save.image("PNsq.RData")
+
+
+```
+```{r echo=FALSE, fig.width=10, fig.height=8, fig.align='center'}
+knitr::include_graphics("Usq-correct-02a.png", dpi = 500)
+```
+
+
+Doing the GT algorithm by tilting at the true value does not give a different profile.
+```{r echo=TRUE, eval=FALSE}
+
+#### ---------------------------------------------------------------------------
+# Tilting from the true value allows GT not to die
+
+parms.Usq$mu <- -1 #I will tilt from the true value
+
+
+#### ---------------------------------------------------------------------------
+# Sampling from the conditional unobserved process
+Xpost.ModUsq2 <- Xpost.samp(model="Normsq.Pois", parm.list=parms.Usq,
+                            sim.data=out.simUsq, n.iter=50100,n.adapt=1000,
+                            n.update=1000,thin=4,n.chains=5)
+
+Xpost.binned2 <- do.call(rbind,Xpost.ModUsq2)
+
+B <- nrow(Xpost.binned)
+
+XpostSample <- Xpost.binned
+
+sd1 <- parms.Usq$sd1
+beta<- parms.Usq$mu
+n <- nrow(out.simUsq)
+Y <- out.simUsq[,1]
+
+beta <- Beta.hat
+bracket <- 6
+
+
+#### ---------------------------------------------------------------------------
+# Computing GT's denominator for every sampled X and every value of the
+# parameter 'beta' we are profiling over
+prec.prof <- 0.02
+beta.profs <- seq(from=beta-bracket,to=beta+bracket, by=prec.prof)
+len.prof <- length(beta.profs)
+prof.vec <- rep(0,len.prof)
+
+for(i in 1:len.prof){
+  
+  ith.beta <- beta.profs[i]
+  GT.logdiff <- rep(0,B)
+  
+  for(j in 1:B){
+    X.star <- XpostSample[j,]
+    GT.lnumer.persamp<- sum(dnorm(x=X.star, mean=ith.beta, sd=sd1, log=TRUE))
+    #  +dchisq(x=(X.star^2)/(sd1^2), df=1,ncp=(ith.beta^2), log=TRUE)
+    # + dpois(x=Y, lambda=Usq.star, log=TRUE) --> it cancels
+    
+    GT.ldenom.persamp <-  sum(dnorm(x=X.star, mean=beta, sd=sd1, log=TRUE))
+    # + dchisq(x=(X.star^2)/(sd1^2), df=1,ncp=(beta^2), log=TRUE)
+    # + dpois(x=Y, lambda=Usq.star, log=TRUE) --> it cancels
+    
+    GT.logdiff[j] <- GT.lnumer.persamp-GT.ldenom.persamp
+  }
+  
+  ratio.prof.vec.star <- exp(GT.logdiff)
+  prof.vec[i] <- mean(ratio.prof.vec.star)
+  
+}
+
+#### ---------------------------------------------------------------------------
+# Plotting the MC profile with the GT profile
+par(oma=c(1,1,1,1), mar=c(4,5,2,2))
+plot(psi.grid.plot,MCprof.plot, type="l", col="black", lwd=2, xlim=c(-10,8), 
+     xlab=bquote("Values of" ~ beta), ylab="Relative Likelihood", bty="l", 
+     cex.lab=1.5)
+points(beta.profs,prof.vec, type="l", lty=2, lwd=2, col="red")
+points(x=Beta.hatUsq.CI,y=c(0,0), col="blue", type="l" ,lty=1,lwd=4)
+abline(v=Beta.hat, lwd=2,lty=2)
+abline(h=exp(-qchisq(p=0.95,df=1)/2),lty=2, col="gray")
+legend("topright", legend=c("GT", "MC", "MLE","DC-CI",bquote("exp(-0.5"~ chi[0.95]^2~")")), col=c("red", "black","black", "blue","gray"), lty=c(2,1,2,1,2), lwd=c(2,2,2,4,1), bty="n", cex=1.15)
+
+
+```
+
+```{r echo=FALSE, fig.width=10, fig.height=8, fig.align='center'}
+knitr::include_graphics("Usq-correct-02b.png", dpi = 500)
+
+```
+
+
+
+Remove previous object file and DLL if present
+```{r}
+#### ---------------------------------------------------------------------------
+dyn.unload(dynlib(model_name))
+
+if (length(list.files(pattern = "\\.o$", full.names = TRUE))>0) {
+  file.remove(list.files(pattern = "\\.o$", full.names = TRUE))
+}
+if (length(list.files(pattern = "\\.so$", full.names = TRUE))>0) {
+  file.remove(list.files(pattern = "\\.so$", full.names = TRUE))
+}
+if (length(list.files(pattern = "\\.cpp$", full.names = TRUE))>0) {
+  file.remove(list.files(pattern = "\\.cpp$", full.names = TRUE))
+}
+#

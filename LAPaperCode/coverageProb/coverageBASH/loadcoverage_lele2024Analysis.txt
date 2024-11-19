@@ -1,0 +1,4 @@
+scp -r /Users/constantingeorgeglen/Documents/Databases/Analyses/Program/TMB/code/LaplaceApproximation/Examples/coverageProb/coverageBASH/* george.glen@hpg.rc.ufl.edu:/home/george.glen/cmd/TMBPaper_MCcoverage/.
+
+scp -r george.glen@hpg.rc.ufl.edu:/home/george.glen/cmd/TMBPaper_MCcoverage/. /Users/constantingeorgeglen/Desktop/
+
