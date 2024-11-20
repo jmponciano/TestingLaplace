@@ -122,10 +122,6 @@ LN1
 
 
 
-```{r echo=FALSE, fig.width=10, fig.height=8, fig.align='center'}
-knitr::include_graphics("LN1.png", dpi = 500)
-
-```
 b) Comparison of the MC likelihood function with GT
 ```{r echo=TRUE,  eval=FALSE}
 
@@ -249,7 +245,7 @@ LN2 <- ggplot(gridmcdf, aes(Beta.values, Rel.Prof.Like) ) +
              panel.grid.minor = element_blank(),
              strip.background = element_blank(),
              axis.ticks.length=unit(0.2, "cm"), legend.position = "bottom")
-
+LN2
   
 #### ---------------------------------------------------------------------------
 LN.all <- ggplot(gridmcdf, aes(Beta.values, Rel.Prof.Like) ) + 
@@ -273,7 +269,7 @@ LN.all <- ggplot(gridmcdf, aes(Beta.values, Rel.Prof.Like) ) +
              strip.background = element_blank(),
              legend.key.width = unit(4, "line"),        
              axis.ticks.length=unit(0.2, "cm"), legend.position = "bottom")   
-  
+LN.all
 
 
 
@@ -289,9 +285,6 @@ LN.all <- ggplot(gridmcdf, aes(Beta.values, Rel.Prof.Like) ) +
 
 ```
 
-```{r echo=FALSE, fig.width=10, fig.height=8, fig.align='center'}
-knitr::include_graphics("LN2.png", dpi = 500)
-```
 
 
 

@@ -64,6 +64,7 @@ n.adapt <- 1000
 n.update <- 1000
 thin <- 2
 
+
 #### ---------------------------------------------------------------------------
 #### Fit model using data cloning
 cl <- makePSOCKcluster(n.chains)
@@ -208,7 +209,7 @@ MCMCset=list('n.iter.dc'=50000,'n.chains.dc'=3,
 test.DD.multi.par <- DD_wrapper( profile.par = "beta", model = "Bivar.Norm",
                                  #known.mle = list(MLE=ModNN.mles, FI=solve(vcov(dcrunNN))),
                                  known.params = list(df1=parms.err.varsNN$df1),
-                                 df=sim.data, psi.grid = ModNN.TMB$ci.obj$data$beta, 
+                                 sim.data=sim.data, psi.grid = ModNN.TMB$ci.obj$data$beta, 
                                  MCMCset=MCMCset, CIalpha=0.95, n.clones=c(16))
 
 MP.NNtmb      <- data.frame(betavals=ModNN.TMB$ci.obj$data$beta, tmbrel.like = 

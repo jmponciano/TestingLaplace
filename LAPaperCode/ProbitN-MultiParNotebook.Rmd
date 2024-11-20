@@ -208,7 +208,7 @@ MCMCset=list('n.iter.dc'=n.iter,'n.chains.dc'=3,
 
 test.DD.multi.par <- DD_wrapper( profile.par = "beta", model = "Probit.Norm", 
                                  known.params = list(df1=parms.err.varsProbN$df1),
-                                 df=sim.data, psi.grid = beta.profs, 
+                                 sim.data=sim.data, psi.grid = beta.profs, 
                                  MCMCset=MCMCset, 
                                  CIalpha=0.95, n.clones=c(16))
 

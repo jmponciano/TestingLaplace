@@ -116,13 +116,6 @@ ProbitN1
 
 ```
 
-```{r echo=FALSE, fig.width=10, fig.height=8, fig.align='center'}
-knitr::include_graphics("ProbitN01.png", dpi = 500)
-
-```
-
-
-
 
 b) Comparing GT to the MC likelihood
 ```{r echo=TRUE,  eval=FALSE}
@@ -261,11 +254,6 @@ ProbitN.all
 # save(ProbitN.all, file="ProbitNall.RData")
 # save.image("ProbitN-Onepar.RData")
 
-
-```
-
-```{r echo=FALSE, fig.width=10, fig.height=8, fig.align='center'}
-knitr::include_graphics("ProbitN02.png", dpi = 500)
 
 ```
 

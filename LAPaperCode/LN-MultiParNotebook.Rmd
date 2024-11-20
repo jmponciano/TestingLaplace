@@ -204,7 +204,7 @@ MCMCset=list('n.iter.dc'=n.iter,'n.chains.dc'=n.chains,
 test.DD.multi.par <- DD_wrapper( profile.par = "beta", model = "Logit.Norm", 
                                  #known.mle = list(MLE=ModLN.mles, FI=solve(vcov(dcrunLN))),
                                  known.params = list(df1=parms.err.varsLN$df1),
-                                 df=sim.data, psi.grid = ModLN.TMB$ci.obj$data$beta, 
+                                 sim.data=sim.data, psi.grid = ModLN.TMB$ci.obj$data$beta, 
                                  MCMCset=MCMCset, CIalpha=0.95, n.clones=c(32))
 
 

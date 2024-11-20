@@ -37,7 +37,7 @@ a) Comparison of the the MC likelihood function with TMB
 #### ---------------------------------------------------------------------------
 #### Generate data
 parms.err.varsNN <- list(beta=-1, df1=2, sd1=3,sd2=2)
-out.simNN <- sim.example(n=100, parm.list=parms.err.varsNN, model="Bivar.Norm")
+out.simNN <- sim.example(n=20, parm.list=parms.err.varsNN, model="Bivar.Norm")
 
 
 #### ---------------------------------------------------------------------------

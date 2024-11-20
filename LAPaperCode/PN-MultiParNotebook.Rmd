@@ -199,7 +199,7 @@ MCMCset=list('n.iter.dc'=n.iter,'n.chains.dc'=3,
 
 test.DD.multi.par <- DD_wrapper( profile.par = "beta", model = "Pois.Norm", 
                                  known.params = list(df1=parms.err.varsPN$df1),
-                                 df=sim.data, psi.grid = seq(-3, 3, 0.01), MCMCset=MCMCset, 
+                                 sim.data=sim.data, psi.grid = seq(-3, 3, 0.01), MCMCset=MCMCset, 
                                  CIalpha=0.95, n.clones=c(16))
 
 
